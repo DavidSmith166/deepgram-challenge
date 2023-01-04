@@ -1,26 +1,19 @@
-use anyhow::{anyhow, bail, Context};
-use axum::body::Body;
-use axum::body::Bytes;
+use anyhow::{bail, Context};
 use axum::extract::multipart::Field;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Multipart;
-use axum::extract::{BodyStream, Json};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{
     routing::{get, post},
     Router,
 };
-use futures::stream::{self, StreamExt};
+use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fmt::format;
-use std::fs::{self, Metadata};
-use std::io::prelude::*;
-use std::path::Path;
-use std::string;
+use tokio::fs::{create_dir_all, File};
+use tokio::io::AsyncWriteExt;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct FileUploadRequest {
@@ -37,20 +30,12 @@ async fn write_file<'a>(
     path.push(&upload_request.file_name);
     println!("writing file to path: {:?}", path);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        create_dir_all(parent).await?;
     }
-    let mut file = fs::File::create(path)?;
-    if let Some(ref file_type) = upload_request.file_type {
-        match file_type.as_str() {
-            "wav" => {
-                // todo extract metadata from wav
-                while let Some(bytes) = file_field.next().await {
-                    let bytes = bytes?;
-                    file.write_all(&bytes)?;
-                }
-            }
-            _ => todo!(),
-        }
+    let mut file = File::create(path).await?;
+    while let Some(bytes) = file_field.next().await {
+        let bytes = bytes?;
+        file.write_all(&bytes).await?;
     }
     Ok(())
 }
