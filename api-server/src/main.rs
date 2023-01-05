@@ -10,10 +10,7 @@ use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{
-    routing::{get, post},
-    Router,
-};
+use axum::{routing::get, Router};
 use db::{
     establish_connection, find_file_by_file_name, find_file_by_file_type,
     find_file_by_file_upload_date, insert_file, list_file_names,
