@@ -1,6 +1,7 @@
 mod db;
 mod schema;
 use anyhow::{bail, Context};
+use axum::extract::Path;
 use axum::extract::multipart::Field;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Multipart;
@@ -183,6 +184,27 @@ async fn filter_files(
     }
 }
 
+async fn get_file_info(db: State<Arc<Mutex<SqliteConnection>>>, Path(file_name): Path<String>) -> Result<impl IntoResponse, StatusCode> {
+    let results = find_file_by_file_name(db.0, &file_name).await;
+    let result: Option<db::File>;
+    match results {
+        Ok(mut results) => {
+            result = results.pop();
+        },
+        Err(e) => {
+            eprintln!("{:?}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    };
+    match serde_json::to_string(&result) {
+        Ok(json_str) => Ok(json_str),
+        Err(e) => {
+            eprintln!("{:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let db = Arc::new(Mutex::new(establish_connection()));
@@ -190,6 +212,7 @@ async fn main() {
         .route("/", get(|| async { "Hello, World!" }))
         .route("/audio", get(list_files).post(accept_file_stream))
         .route("/audio/query", get(filter_files))
+        .route("/audio/info/:file_name", get(get_file_info))
         .with_state(db)
         .layer(DefaultBodyLimit::disable());
     axum::Server::bind(&"127.0.0.1:8080".parse().unwrap())

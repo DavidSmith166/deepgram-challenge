@@ -2,11 +2,12 @@ use crate::schema::files;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use dotenvy::dotenv;
+use serde::{Serialize, Deserialize};
 use std::env;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-#[derive(Queryable, Insertable, Debug, PartialEq)]
+#[derive(Queryable, Insertable, Serialize, Deserialize, Debug, PartialEq)]
 #[diesel(table_name = files)]
 #[diesel(treat_none_as_default_value = false)]
 pub struct File {
