@@ -1,10 +1,11 @@
 mod db;
 mod schema;
 use anyhow::{bail, Context};
-use axum::extract::Path;
+use axum::body::StreamBody;
 use axum::extract::multipart::Field;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Multipart;
+use axum::extract::Path;
 use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -27,6 +28,7 @@ use std::time::SystemTime;
 use tokio::fs::{create_dir_all, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
+use tokio_util::io::ReaderStream;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct FileUploadRequest {
@@ -184,16 +186,19 @@ async fn filter_files(
     }
 }
 
-async fn get_file_info(db: State<Arc<Mutex<SqliteConnection>>>, Path(file_name): Path<String>) -> Result<impl IntoResponse, StatusCode> {
+async fn get_file_info(
+    db: State<Arc<Mutex<SqliteConnection>>>,
+    Path(file_name): Path<String>,
+) -> Result<impl IntoResponse, StatusCode> {
     let results = find_file_by_file_name(db.0, &file_name).await;
     let result: Option<db::File>;
     match results {
         Ok(mut results) => {
             result = results.pop();
-        },
+        }
         Err(e) => {
             eprintln!("{:?}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR)
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
     match serde_json::to_string(&result) {
@@ -205,6 +210,23 @@ async fn get_file_info(db: State<Arc<Mutex<SqliteConnection>>>, Path(file_name):
     }
 }
 
+async fn download_file(Path(file_name): Path<String>) -> Result<impl IntoResponse, StatusCode> {
+    let mut path = std::env::current_dir().map_err(|e| {
+        eprintln!("{:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    path.push("audio");
+    path.push(&file_name);
+    println!("Reading file from path: {:?}", path);
+    let file = match tokio::fs::File::open(path).await {
+        Ok(file) => file,
+        Err(_) => return Err(StatusCode::NOT_FOUND),
+    };
+    let stream = ReaderStream::new(file);
+    let body = StreamBody::new(stream);
+    Ok(body)
+}
+
 #[tokio::main]
 async fn main() {
     let db = Arc::new(Mutex::new(establish_connection()));
@@ -213,6 +235,7 @@ async fn main() {
         .route("/audio", get(list_files).post(accept_file_stream))
         .route("/audio/query", get(filter_files))
         .route("/audio/info/:file_name", get(get_file_info))
+        .route("/audio/download/:file_name", get(download_file))
         .with_state(db)
         .layer(DefaultBodyLimit::disable());
     axum::Server::bind(&"127.0.0.1:8080".parse().unwrap())
