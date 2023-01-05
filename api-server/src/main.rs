@@ -130,15 +130,11 @@ async fn filter_files(
     db: State<Arc<Mutex<SqliteConnection>>>,
     Query(attributes): Query<FileFilterAttributes>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let mut result = std::collections::BTreeSet::<String>::new();
+    let mut results = Vec::<std::collections::BTreeSet<String>>::new();
     if let Some(ref file_name) = attributes.file_name {
         match find_file_by_file_name(db.0.clone(), file_name).await {
             Ok(files) => {
-                let files: Vec<String> = files.into_iter().map(|file| file.file_name).collect();
-                result = result
-                    .intersection(&files.into_iter().collect())
-                    .map(|s| s.to_owned())
-                    .collect();
+                results.push(files.into_iter().map(|file| file.file_name).collect());
             }
             Err(e) => {
                 eprintln!("{:?}", e);
@@ -149,11 +145,7 @@ async fn filter_files(
     if let Some(ref file_type) = attributes.file_type {
         match find_file_by_file_type(db.0.clone(), file_type).await {
             Ok(files) => {
-                let files: Vec<String> = files.into_iter().map(|file| file.file_name).collect();
-                result = result
-                    .intersection(&files.into_iter().collect())
-                    .map(|s| s.to_owned())
-                    .collect();
+                results.push(files.into_iter().map(|file| file.file_name).collect());
             }
             Err(e) => {
                 eprintln!("{:?}", e);
@@ -164,11 +156,7 @@ async fn filter_files(
     if let Some(ref file_upload_date) = attributes.file_upload_date {
         match find_file_by_file_upload_date(db.0.clone(), file_upload_date).await {
             Ok(files) => {
-                let files: Vec<String> = files.into_iter().map(|file| file.file_name).collect();
-                result = result
-                    .intersection(&files.into_iter().collect())
-                    .map(|s| s.to_owned())
-                    .collect();
+                results.push(files.into_iter().map(|file| file.file_name).collect());
             }
             Err(e) => {
                 eprintln!("{:?}", e);
@@ -176,7 +164,16 @@ async fn filter_files(
             }
         }
     }
-
+    while results.len() > 1 {
+        let set_a = results.pop().unwrap();
+        let set_b = results.pop().unwrap();
+        results.push(set_a.intersection(&set_b).map(|s| s.to_owned()).collect());
+    }
+    let result: Vec<String> = if results.len() == 1 {
+        results.pop().unwrap().into_iter().collect()
+    } else {
+        vec![]
+    };
     match serde_json::to_string(&result) {
         Ok(json_str) => Ok(json_str),
         Err(e) => {
@@ -191,10 +188,8 @@ async fn main() {
     let db = Arc::new(Mutex::new(establish_connection()));
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
-        .route(
-            "/audio",
-            get(list_files).get(filter_files).post(accept_file_stream),
-        )
+        .route("/audio", get(list_files).post(accept_file_stream))
+        .route("/audio/query", get(filter_files))
         .with_state(db)
         .layer(DefaultBodyLimit::disable());
     axum::Server::bind(&"127.0.0.1:8080".parse().unwrap())
